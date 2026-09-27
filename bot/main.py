@@ -107,7 +107,9 @@ DIFFICULTY_COLORS = {
 
 
 # NEW: shared by /daily, /postnow and the automatic post
-def build_daily_embed(problem: DailyProblem, description: str | None = None) -> discord.Embed:
+def build_daily_embed(
+    problem: DailyProblem, description: str | None = None
+) -> discord.Embed:
     embed = discord.Embed(
         title=problem.title,
         url=problem.url,
@@ -338,13 +340,17 @@ async def leaderboard(
     await interaction.response.send_message(embed=embed)
 
 
-#automatic daily post
+# automatic daily post
 
-POST_TIME = time(hour=0, minute=5, tzinfo=timezone.utc)  # LeetCode switches at 00:00 UTC
+POST_TIME = time(
+    hour=0, minute=5, tzinfo=timezone.utc
+)  # LeetCode switches at 00:00 UTC
 POST_MESSAGE = "📅 **New daily problem!** Solve it on LeetCode, then run `/solved`."
 
 
-async def fetch_todays_problem(retries: int = 3, delay: int = 60) -> DailyProblem | None:
+async def fetch_todays_problem(
+    retries: int = 3, delay: int = 60
+) -> DailyProblem | None:
     """Fetch the daily problem, retrying until LeetCode shows today's date."""
     today = datetime.now(timezone.utc).date().isoformat()
     for attempt in range(1, retries + 1):
@@ -406,7 +412,9 @@ async def before_daily_post_loop():
         print(f"[post] Unexpected error on startup: {e!r}")
 
 
-@bot.tree.command(name="postnow", description="Post today's problem in the /setup channel now (admin)")
+@bot.tree.command(
+    name="postnow", description="Post today's problem in the /setup channel now (admin)"
+)
 @app_commands.default_permissions(manage_guild=True)
 @app_commands.guild_only()
 async def postnow(interaction: discord.Interaction):
