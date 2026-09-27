@@ -45,7 +45,7 @@ class DailyCodeBot(discord.Client):
         """Runs once before the bot connects."""
         self.http_session = aiohttp.ClientSession()
         self.db = await init_db(DB_PATH)
-        daily_post_loop.start()  # NEW: start the automatic daily post
+        daily_post_loop.start()  # automatic daily post
 
         if DEV_GUILD_ID:
             guild = discord.Object(id=int(DEV_GUILD_ID))
@@ -58,7 +58,7 @@ class DailyCodeBot(discord.Client):
 
     async def close(self):
         """Runs on shutdown: close HTTP session and database."""
-        daily_post_loop.cancel()  # NEW
+        daily_post_loop.cancel()
         if self.http_session:
             await self.http_session.close()
         if self.db:
@@ -106,7 +106,7 @@ DIFFICULTY_COLORS = {
 }
 
 
-# NEW: shared by /daily, /postnow and the automatic post
+# shared by /daily, /postnow and the automatic post
 def build_daily_embed(
     problem: DailyProblem, description: str | None = None
 ) -> discord.Embed:
@@ -137,7 +137,7 @@ async def daily(interaction: discord.Interaction):
         )
         return
 
-    await interaction.followup.send(embed=build_daily_embed(problem))  # CHANGED
+    await interaction.followup.send(embed=build_daily_embed(problem))
 
 
 @bot.tree.command(name="link", description="Link your LeetCode account")
