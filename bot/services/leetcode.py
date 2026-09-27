@@ -47,9 +47,9 @@ def parse_daily(data: dict) -> DailyProblem:
     """Turn the raw GraphQL JSON into a DailyProblem."""
     try:
         daily = data["data"]["activeDailyCodingChallengeQuestion"]
-
         if daily is None:
             raise LeetCodeError("No daily challenge was returned")
+        
         q = daily["question"]
         return DailyProblem(
             date=daily["date"],
