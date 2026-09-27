@@ -30,6 +30,17 @@ CREATE TABLE IF NOT EXISTS solves (
     PRIMARY KEY (discord_id, date)
 );
 
+CREATE TABLE IF NOT EXISTS daily_posts (
+    guild_id        INTEGER NOT NULL,
+    date            TEXT NOT NULL,
+
+    PRIMARY KEY (guild_id, date),
+
+    FOREIGN KEY (guild_id)
+        REFERENCES guilds(guild_id)
+        ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS guild_members (
     guild_id        INTEGER NOT NULL REFERENCES guilds(guild_id) ON DELETE CASCADE,
     discord_id      INTEGER NOT NULL REFERENCES users(discord_id) ON DELETE CASCADE,

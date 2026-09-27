@@ -1,17 +1,20 @@
+import asyncio
 import os
-from datetime import date, datetime, timezone
+from datetime import date, datetime, time, timezone
 
 import aiohttp
 import aiosqlite
 import discord
 from discord import app_commands
+from discord.ext import tasks
 from dotenv import load_dotenv
 
 from bot.db import init_db
-from bot.repositories import guilds, users
+from bot.repositories import guilds, posts, users
 from bot.repositories.problems import save_daily_problem
 from bot.services import streaks
 from bot.services.leetcode import (
+    DailyProblem,
     LeetCodeError,
     fetch_daily,
     fetch_recent_accepted,
@@ -42,6 +45,7 @@ class DailyCodeBot(discord.Client):
         """Runs once before the bot connects."""
         self.http_session = aiohttp.ClientSession()
         self.db = await init_db(DB_PATH)
+        daily_post_loop.start()  # NEW: start the automatic daily post
 
         if DEV_GUILD_ID:
             guild = discord.Object(id=int(DEV_GUILD_ID))
@@ -54,6 +58,7 @@ class DailyCodeBot(discord.Client):
 
     async def close(self):
         """Runs on shutdown: close HTTP session and database."""
+        daily_post_loop.cancel()  # NEW
         if self.http_session:
             await self.http_session.close()
         if self.db:
@@ -67,7 +72,6 @@ class DailyCodeBot(discord.Client):
 bot = DailyCodeBot()
 
 
-# NEW
 async def remember_member(interaction: discord.Interaction) -> None:
     """Record that the user belongs to this server (for /leaderboard)."""
     if interaction.guild is not None:
@@ -102,6 +106,22 @@ DIFFICULTY_COLORS = {
 }
 
 
+# NEW: shared by /daily, /postnow and the automatic post
+def build_daily_embed(problem: DailyProblem, description: str | None = None) -> discord.Embed:
+    embed = discord.Embed(
+        title=problem.title,
+        url=problem.url,
+        description=description,
+        color=DIFFICULTY_COLORS.get(problem.difficulty, discord.Color.blurple()),
+    )
+    embed.add_field(name="Difficulty", value=problem.difficulty)
+    embed.add_field(name="Acceptance", value=f"{problem.ac_rate}%")
+    if problem.tags:
+        embed.add_field(name="Topics", value=", ".join(problem.tags), inline=False)
+    embed.set_footer(text=f"Daily problem: {problem.date}")
+    return embed
+
+
 @bot.tree.command(name="daily", description="Show today's LeetCode problem")
 async def daily(interaction: discord.Interaction):
     await interaction.response.defer()  # 15 mins to send the answer instead of 3 s
@@ -115,19 +135,7 @@ async def daily(interaction: discord.Interaction):
         )
         return
 
-    embed = discord.Embed(
-        title=problem.title,
-        url=problem.url,
-        color=DIFFICULTY_COLORS.get(problem.difficulty, discord.Color.blurple()),
-    )
-
-    embed.add_field(name="Difficulty", value=problem.difficulty)
-    embed.add_field(name="Acceptance", value=f"{problem.ac_rate}%")
-    if problem.tags:
-        embed.add_field(name="Topics", value=", ".join(problem.tags), inline=False)
-    embed.set_footer(text=f"Daily problem: {problem.date}")
-
-    await interaction.followup.send(embed=embed)
+    await interaction.followup.send(embed=build_daily_embed(problem))  # CHANGED
 
 
 @bot.tree.command(name="link", description="Link your LeetCode account")
@@ -159,7 +167,7 @@ async def link(interaction: discord.Interaction, username: str):
         )
         return
 
-    await remember_member(interaction)  # ADDED
+    await remember_member(interaction)
     await interaction.followup.send(f"Linked to LeetCode account **{username}**.")
 
 
@@ -174,7 +182,7 @@ async def solved(interaction: discord.Interaction):
             "You haven't linked a LeetCode account yet. Use `/link` first."
         )
         return
-    await remember_member(interaction)  # ADDED
+    await remember_member(interaction)
 
     # Today's problem and the user's recent accepted submissions
     try:
@@ -244,8 +252,8 @@ async def streak(
             text = f"{target.display_name} hasn't linked a LeetCode account yet."
         await interaction.response.send_message(text, ephemeral=True)
         return
-    if target == interaction.user:  # ADDED
-        await remember_member(interaction)  # ADDED
+    if target == interaction.user:
+        await remember_member(interaction)
 
     today = datetime.now(timezone.utc).date()
     state = users.row_to_streak_state(user)
@@ -328,6 +336,101 @@ async def leaderboard(
     )
     embed.set_footer(text=interaction.guild.name)
     await interaction.response.send_message(embed=embed)
+
+
+#automatic daily post
+
+POST_TIME = time(hour=0, minute=5, tzinfo=timezone.utc)  # LeetCode switches at 00:00 UTC
+POST_MESSAGE = "📅 **New daily problem!** Solve it on LeetCode, then run `/solved`."
+
+
+async def fetch_todays_problem(retries: int = 3, delay: int = 60) -> DailyProblem | None:
+    """Fetch the daily problem, retrying until LeetCode shows today's date."""
+    today = datetime.now(timezone.utc).date().isoformat()
+    for attempt in range(1, retries + 1):
+        try:
+            problem = await fetch_daily(bot.http_session)
+            if problem.date == today:
+                return problem
+            print(f"[post] LeetCode still shows {problem.date}, expected {today}")
+        except LeetCodeError as e:
+            print(f"[post] attempt {attempt}/{retries}: {e}")
+        if attempt < retries:
+            await asyncio.sleep(delay)
+    return None
+
+
+async def send_to_channel(channel_id: int, embed: discord.Embed) -> None:
+    """Send an embed to a channel id (raises discord.HTTPException on failure)."""
+    channel = bot.get_channel(channel_id) or await bot.fetch_channel(channel_id)
+    await channel.send(content=POST_MESSAGE, embed=embed)
+
+
+async def post_daily_to_all() -> None:
+    """Post today's problem in every configured channel that didn't get it yet."""
+    problem = await fetch_todays_problem()
+    if problem is None:
+        print("[post] Giving up for now: today's problem not available")
+        return
+    await save_daily_problem(bot.db, problem)
+    embed = build_daily_embed(problem)
+
+    sent = 0
+    for guild_id, channel_id in await guilds.all_channels(bot.db):
+        if await posts.was_posted(bot.db, guild_id, problem.date):
+            continue
+        try:
+            await send_to_channel(channel_id, embed)
+        except discord.HTTPException as e:  # includes Forbidden and NotFound
+            print(f"[post] guild {guild_id}, channel {channel_id}: {e}")
+            continue  # one broken server must not stop the others
+        await posts.mark_posted(bot.db, guild_id, problem.date)
+        sent += 1
+    print(f"[post] Daily problem {problem.date} posted in {sent} channel(s)")
+
+
+@tasks.loop(time=POST_TIME)
+async def daily_post_loop():
+    try:
+        await post_daily_to_all()
+    except Exception as e:  # noqa: BLE001 - an unhandled error would stop the loop for good
+        print(f"[post] Unexpected error: {e!r}")
+
+
+@daily_post_loop.before_loop
+async def before_daily_post_loop():
+    await bot.wait_until_ready()
+    try:
+        await post_daily_to_all()  # catch up if the bot was offline at post time
+    except Exception as e:  # noqa: BLE001 - must not prevent the loop from starting
+        print(f"[post] Unexpected error on startup: {e!r}")
+
+
+@bot.tree.command(name="postnow", description="Post today's problem in the /setup channel now (admin)")
+@app_commands.default_permissions(manage_guild=True)
+@app_commands.guild_only()
+async def postnow(interaction: discord.Interaction):
+    channel_id = await guilds.get_channel(bot.db, interaction.guild.id)
+    if channel_id is None:
+        await interaction.response.send_message(
+            "No channel configured yet. Run `/setup` first.", ephemeral=True
+        )
+        return
+
+    await interaction.response.defer(ephemeral=True)
+    try:
+        problem = await fetch_daily(bot.http_session)
+        await send_to_channel(channel_id, build_daily_embed(problem))
+    except LeetCodeError as e:
+        print(f"[postnow] {e}")
+        await interaction.followup.send("Couldn't reach LeetCode right now.")
+        return
+    except discord.HTTPException as e:
+        print(f"[postnow] {e}")
+        await interaction.followup.send(f"Couldn't post in <#{channel_id}>: {e.text}")
+        return
+
+    await interaction.followup.send(f"Posted in <#{channel_id}>.")
 
 
 if __name__ == "__main__":
