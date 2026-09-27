@@ -46,4 +46,3 @@ async def init_db(path: str) -> aiosqlite.Connection:
     await conn.executescript(SCHEMA)
     await conn.commit()
     return conn
-

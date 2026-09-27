@@ -1,4 +1,5 @@
 from datetime import date
+
 from bot.services.streaks import StreakState, displayed_streak, record_solve
 
 TODAY = date(2026, 9, 27)
@@ -7,6 +8,7 @@ LAST_WEEK = date(2026, 9, 20)
 
 
 # record_solve
+
 
 def test_first_solve_ever_starts_streak_at_1():
     state = StreakState(current=0, longest=0, last_solved=None)
@@ -52,6 +54,7 @@ def test_streak_across_month_boundary():
 
 
 # displayed_streak
+
 
 def test_display_streak_solved_today():
     state = StreakState(current=7, longest=7, last_solved=TODAY)
