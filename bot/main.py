@@ -7,7 +7,8 @@ from discord import app_commands
 from dotenv import load_dotenv
 
 from bot.db import init_db
-from bot.services.leetcode import LeetCodeError, fetch_daily
+from bot.repositories.users import LeetCodeNameTaken, link_user
+from bot.services.leetcode import LeetCodeError, fetch_daily, user_exists
 
 load_dotenv()
 
@@ -105,6 +106,32 @@ async def daily(interaction: discord.Interaction):
     embed.set_footer(text=f"Daily problem: {problem.date}")
 
     await interaction.followup.send(embed=embed)
+
+
+@bot.tree.command(name="link", description="Link your LeetCode account")
+@app_commands.describe(username="Your LeetCode username")
+async def link(interaction: discord.Interaction, username: str):
+    await interaction.response.defer(ephemeral=True)
+    username = username.strip()
+
+    try:
+        exists = await user_exists(bot.http_session, username)
+    except LeetCodeError as e:
+        print(f"[link] {e}")
+        await interaction.followup.send("Couldn't reach LeetCode right now. Try again later.")
+        return
+
+    if not exists:
+        await interaction.followup.send(f"LeetCode user **{username}** doesn't exist. Check the spelling.")
+        return
+
+    try:
+        await link_user(bot.db, interaction.user.id, username)
+    except LeetCodeNameTaken:
+        await interaction.followup.send(f"**{username}** is already linked to another Discord account.")
+        return
+
+    await interaction.followup.send(f"Linked to LeetCode account **{username}**.")
 
 
 if __name__ == "__main__":

@@ -21,6 +21,14 @@ query questionOfToday {
 }
 """
 
+USER_QUERY = """
+query userPublicProfile($username: String!) {
+    matchedUser(username: $username) {
+        username
+    }
+}
+"""
+
 HEADERS = {
     "Content-Type": "application/json",
     "Referer": "https://leetcode.com",
@@ -43,6 +51,30 @@ class DailyProblem:
     tags: tuple[str, ...]
 
 
+#HTTP
+async def _post_graphql(session: aiohttp.ClientSession, payload: dict) -> dict:
+    """Send one GraphQL request to LeetCode and return the JSON body."""
+    try:
+        async with session.post(
+            GRAPHQL_URL,
+            json=payload,
+            headers=HEADERS,
+            timeout=aiohttp.ClientTimeout(total=10),
+        ) as resp:
+            if resp.status != 200:
+                raise LeetCodeError(f"LeetCode returned HTTP {resp.status}")
+            data = await resp.json()
+    except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+        raise LeetCodeError(f"Network error: {e}") from e
+    except ValueError as e:
+        raise LeetCodeError(f"Invalid JSON from LeetCode: {e}") from e
+
+    if "errors" in data:
+        raise LeetCodeError(f"LeetCode GraphQL error: {data['errors']}")
+    return data
+
+
+# daily problem
 def parse_daily(data: dict) -> DailyProblem:
     """Turn the raw GraphQL JSON into a DailyProblem."""
     try:
@@ -67,21 +99,25 @@ def parse_daily(data: dict) -> DailyProblem:
 async def fetch_daily(session: aiohttp.ClientSession) -> DailyProblem:
     """Fetch today's daily problem from LeetCode."""
     payload = {"query": DAILY_QUERY, "operationName": "questionOfToday"}
-    try:
-        async with session.post(
-            GRAPHQL_URL,
-            json=payload,
-            headers=HEADERS,
-            timeout=aiohttp.ClientTimeout(total=10),
-        ) as resp:
-            if resp.status != 200:
-                raise LeetCodeError(f"LeetCode returned HTTP {resp.status}")
-            data = await resp.json()
-            if "errors" in data:
-                raise LeetCodeError(f"Leetcode GraphQL error: {data['errors']}")
-    except (aiohttp.ClientError, asyncio.TimeoutError) as e:
-        raise LeetCodeError(f"Network error: {e}") from e
-    except ValueError as e:
-        raise LeetCodeError(f"Invalid JSON from LeetCode: {e}") from e
-
+    data = await _post_graphql(session, payload)
     return parse_daily(data)
+
+
+# User lookup
+def parse_user_exists(data: dict) -> bool:
+    """True if the GraphQL response contains a matching user."""
+    try:
+        return data["data"]["matchedUser"] is not None
+    except (KeyError, TypeError) as e:
+        raise LeetCodeError(f"Unexpected response format: {e}") from e
+
+
+async def user_exists(session: aiohttp.ClientSession, username: str) -> bool:
+    """Check whether a LeetCode username exists."""
+    payload = {
+        "query": USER_QUERY,
+        "operationName": "userPublicProfile",
+        "variables": {"username": username},
+    }
+    data = await _post_graphql(session, payload)
+    return parse_user_exists(data)
