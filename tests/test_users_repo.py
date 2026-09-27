@@ -29,7 +29,8 @@ async def conn(tmp_path):
     await connection.close()
 
 
-#link_user/get_user
+# link_user/get_user
+
 
 @pytest.mark.asyncio
 async def test_get_unknown_user_returns_none(conn):
@@ -70,7 +71,8 @@ async def test_same_user_relinking_same_name_is_fine(conn):
     assert (await get_user(conn, 1))["leetcode_name"] == "fatma"
 
 
-#record_solve
+# record_solve
+
 
 @pytest.mark.asyncio
 async def test_row_to_streak_state_new_user(conn):
@@ -108,7 +110,8 @@ async def test_record_solve_twice_same_day_raises_and_keeps_points(conn):
     assert user["current_streak"] == 1
 
 
-#count_solves
+# count_solves
+
 
 @pytest.mark.asyncio
 async def test_count_solves(conn):

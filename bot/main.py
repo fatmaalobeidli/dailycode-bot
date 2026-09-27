@@ -8,7 +8,7 @@ from discord import app_commands
 from dotenv import load_dotenv
 
 from bot.db import init_db
-from bot.repositories import users
+from bot.repositories import guilds, users
 from bot.repositories.problems import save_daily_problem
 from bot.services import streaks
 from bot.services.leetcode import (
@@ -65,6 +65,13 @@ class DailyCodeBot(discord.Client):
 
 
 bot = DailyCodeBot()
+
+
+# NEW
+async def remember_member(interaction: discord.Interaction) -> None:
+    """Record that the user belongs to this server (for /leaderboard)."""
+    if interaction.guild is not None:
+        await guilds.register_member(bot.db, interaction.guild.id, interaction.user.id)
 
 
 @bot.tree.error
@@ -152,6 +159,7 @@ async def link(interaction: discord.Interaction, username: str):
         )
         return
 
+    await remember_member(interaction)  # ADDED
     await interaction.followup.send(f"Linked to LeetCode account **{username}**.")
 
 
@@ -166,6 +174,7 @@ async def solved(interaction: discord.Interaction):
             "You haven't linked a LeetCode account yet. Use `/link` first."
         )
         return
+    await remember_member(interaction)  # ADDED
 
     # Today's problem and the user's recent accepted submissions
     try:
@@ -208,7 +217,7 @@ async def solved(interaction: discord.Interaction):
 
     # Success
     embed = discord.Embed(
-        title=f"DONE {problem.title}",
+        title=f"✅ {problem.title}",
         url=problem.url,
         description=f"{interaction.user.mention} solved today's problem!",
         color=DIFFICULTY_COLORS.get(problem.difficulty, discord.Color.blurple()),
@@ -222,7 +231,9 @@ async def solved(interaction: discord.Interaction):
 
 @bot.tree.command(name="streak", description="Show your streak and stats")
 @app_commands.describe(member="Whose stats to show (default: you)")
-async def streak(interaction: discord.Interaction, member: discord.Member | None = None):
+async def streak(
+    interaction: discord.Interaction, member: discord.Member | None = None
+):
     target = member or interaction.user
     user = await users.get_user(bot.db, target.id)
 
@@ -233,6 +244,8 @@ async def streak(interaction: discord.Interaction, member: discord.Member | None
             text = f"{target.display_name} hasn't linked a LeetCode account yet."
         await interaction.response.send_message(text, ephemeral=True)
         return
+    if target == interaction.user:  # ADDED
+        await remember_member(interaction)  # ADDED
 
     today = datetime.now(timezone.utc).date()
     state = users.row_to_streak_state(user)
@@ -254,6 +267,68 @@ async def streak(interaction: discord.Interaction, member: discord.Member | None
     embed.set_footer(text=f"LeetCode: {user['leetcode_name']}")
 
     await interaction.response.send_message(embed=embed)
+
+
+@bot.tree.command(name="setup", description="Choose the channel for the daily problem")
+@app_commands.describe(channel="Channel where the daily problem gets posted")
+@app_commands.default_permissions(manage_guild=True)
+@app_commands.guild_only()
+async def setup(interaction: discord.Interaction, channel: discord.TextChannel):
+    perms = channel.permissions_for(interaction.guild.me)
+    if not (perms.view_channel and perms.send_messages and perms.embed_links):
+        await interaction.response.send_message(
+            f"I can't post in {channel.mention}. I need **View Channel**, "
+            "**Send Messages** and **Embed Links** there.",
+            ephemeral=True,
+        )
+        return
+
+    await guilds.set_channel(bot.db, interaction.guild.id, channel.id)
+    await interaction.response.send_message(
+        f"Done! The daily problem will be posted in {channel.mention}.", ephemeral=True
+    )
+
+
+MEDALS = ["🥇", "🥈", "🥉"]
+
+
+@bot.tree.command(name="leaderboard", description="Top 10 in this server")
+@app_commands.describe(by="Rank by current streak or by total points")
+@app_commands.choices(
+    by=[
+        app_commands.Choice(name="Streak", value="streak"),
+        app_commands.Choice(name="Points", value="points"),
+    ]
+)
+@app_commands.guild_only()
+async def leaderboard(
+    interaction: discord.Interaction, by: app_commands.Choice[str] | None = None
+):
+    ranking = by.value if by else "streak"
+    today = datetime.now(timezone.utc).date()
+    rows = await guilds.leaderboard(bot.db, interaction.guild.id, today, by=ranking)
+
+    if not rows:
+        await interaction.response.send_message(
+            "Nobody here has linked a LeetCode account yet. Use `/link` to be the first!"
+        )
+        return
+
+    lines = []
+    for i, row in enumerate(rows):
+        rank = MEDALS[i] if i < len(MEDALS) else f"`#{i + 1}`"
+        lines.append(
+            f"{rank} <@{row['discord_id']}> · 🔥 {row['streak']} · ⭐ {row['points']}"
+        )
+
+    embed = discord.Embed(
+        title=f"🏆 Leaderboard · by {ranking}",
+        description="\n".join(lines),
+        color=discord.Color.gold(),
+    )
+    embed.set_footer(text=interaction.guild.name)
+    await interaction.response.send_message(embed=embed)
+
 
 if __name__ == "__main__":
     bot.run(TOKEN)

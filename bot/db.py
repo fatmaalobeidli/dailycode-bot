@@ -3,7 +3,7 @@ import aiosqlite
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS guilds (
     guild_id        INTEGER PRIMARY KEY,
-    channel_id      INTEGER NOT NULL
+    channel_id      INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS users (
