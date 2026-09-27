@@ -21,10 +21,9 @@ async def get_user(conn: aiosqlite.Connection, discord_id: int) -> aiosqlite.Row
     return await cursor.fetchone()
 
 
-async def link_user(
-    conn: aiosqlite.Connection, discord_id: int, leetcode_name: str
-) -> None:
-    """Link a Discord user to a LeetCode account, or aupdate an existing link.
+async def link_user(conn: aiosqlite.Connection, discord_id: int, leetcode_name: str) -> None:
+    """
+    Link a Discord user to a LeetCode account, or aupdate an existing link.
     Streaks and points are kept when a user changes their LeetCode name.
     """
     try:
@@ -37,9 +36,7 @@ async def link_user(
             (discord_id, leetcode_name),
         )
         await conn.commit()
-    except (
-        aiosqlite.IntegrityError
-    ) as e:  # diff Discord user already has this LeetCode name
+    except (aiosqlite.IntegrityError) as e:  # diff Discord user already has this LeetCode name
         await conn.rollback()
         raise LeetCodeNameTaken(leetcode_name) from e
 
@@ -54,14 +51,8 @@ def row_to_streak_state(row: aiosqlite.Row) -> StreakState:
     )
 
 
-async def record_solve(
-    conn: aiosqlite.Connection,
-    discord_id: int,
-    day: date,
-    solved_at: datetime,
-    new_state: StreakState,
-    points: int,
-) -> None:
+async def record_solve(conn: aiosqlite.Connection, discord_id: int, day: date, 
+                       solved_at: datetime, new_state: StreakState, points: int,) -> None:
     """Store a solve and update streak + points automatically (one transaction)."""
     try:
         await conn.execute(
@@ -91,3 +82,9 @@ async def record_solve(
         if "UNIQUE" in str(e):  # PRIMARY KEY (discord_id, date) already exists
             raise AlreadySolved(day.isoformat()) from e
         raise  # any other integrity problem is a real bug, must raise
+
+async def count_solves(conn: aiosqlite.Connection, discord_id: int) -> int:
+    """Total number of daily problems this user has solved."""
+    cursor = await conn.execute("SELECT COUNT(*) FROM solves WHERE discord_id = ?", (discord_id,))
+    (count,) = await cursor.fetchone()  #row with one column
+    return count

@@ -1,5 +1,5 @@
 import os
-from datetime import date
+from datetime import date, datetime, timezone
 
 import aiohttp
 import aiosqlite
@@ -214,11 +214,46 @@ async def solved(interaction: discord.Interaction):
         color=DIFFICULTY_COLORS.get(problem.difficulty, discord.Color.blurple()),
     )
     embed.add_field(name="Points", value=f"+{points}")
-    embed.add_field(name="Streak", value=str(new_state.current))
+    embed.add_field(name="🔥 Streak", value=str(new_state.current))
     embed.add_field(name="Longest", value=str(new_state.longest))
     embed.set_footer(text=f"Daily problem: {problem.date}")
     await interaction.followup.send(embed=embed)
 
+
+@bot.tree.command(name="streak", description="Show your streak and stats")
+@app_commands.describe(member="Whose stats to show (default: you)")
+async def streak(interaction: discord.Interaction, member: discord.Member | None = None):
+    target = member or interaction.user
+    user = await users.get_user(bot.db, target.id)
+
+    if user is None:
+        if target == interaction.user:
+            text = "You haven't linked a LeetCode account yet. Use `/link` first."
+        else:
+            text = f"{target.display_name} hasn't linked a LeetCode account yet."
+        await interaction.response.send_message(text, ephemeral=True)
+        return
+
+    today = datetime.now(timezone.utc).date()
+    state = users.row_to_streak_state(user)
+    current = streaks.displayed_streak(state, today)
+    total = await users.count_solves(bot.db, target.id)
+    solved_today = state.last_solved == today
+
+    embed = discord.Embed(
+        title=f"{target.display_name}'s stats",
+        url=f"https://leetcode.com/u/{user['leetcode_name']}/",
+        color=discord.Color.orange() if current > 0 else discord.Color.greyple(),
+    )
+    embed.set_thumbnail(url=target.display_avatar.url)
+    embed.add_field(name="🔥 Current streak", value=f"{current} days")
+    embed.add_field(name="🏆 Longest streak", value=f"{state.longest} days")
+    embed.add_field(name="⭐ Points", value=str(user["points"]))
+    embed.add_field(name="✅ Total solved", value=str(total))
+    embed.add_field(name="Today", value="Solved" if solved_today else "Not yet")
+    embed.set_footer(text=f"LeetCode: {user['leetcode_name']}")
+
+    await interaction.response.send_message(embed=embed)
 
 if __name__ == "__main__":
     bot.run(TOKEN)
