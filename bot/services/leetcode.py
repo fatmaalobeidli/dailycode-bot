@@ -69,7 +69,9 @@ async def _post_graphql(session: aiohttp.ClientSession, payload: dict) -> dict:
     except ValueError as e:
         raise LeetCodeError(f"Invalid JSON from LeetCode: {e}") from e
 
-    if "errors" in data:
+    # GraphQL can return partial data together with errors (ex "user does not exist")
+    # Only treat it as a failure if there is no usable data at all
+    if data.get("errors") and not data.get("data"):
         raise LeetCodeError(f"LeetCode GraphQL error: {data['errors']}")
     return data
 
