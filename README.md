@@ -1,5 +1,7 @@
 # DailyCode Bot
 
+[![CI](https://github.com/fatmaalobeidli/dailycode-bot/actions/workflows/ci.yml/badge.svg)](https://github.com/fatmaalobeidli/dailycode-bot/actions/workflows/ci.yml)
+
 A Discord bot that turns the **LeetCode daily challenge** into a group habit.
 
 It posts the daily problem to configured Discord servers, verifies accepted submissions through LeetCode, and maintains per-user streaks, points, and per-server leaderboards.
@@ -186,6 +188,27 @@ Inside Discord:
 4. After solving it on LeetCode, run `/solved`.
 
 > Your LeetCode submission history must be publicly accessible for `/solved` to verify your accepted submission.
+
+## Deployment
+
+The bot runs in Docker. The SQLite database is stored in `./data` on the host, so it survives restarts and rebuilds.
+
+```bash
+git clone https://github.com/fatmaalobeidli/dailycode-bot.git
+cd dailycode-bot
+cp .env.example .env        # add your token
+docker compose up -d --build
+docker compose logs -f      # follow the logs
+```
+
+`restart: unless-stopped` brings the bot back automatically after a crash or a server reboot.
+
+To update after pushing new code:
+
+```bash
+git pull
+docker compose up -d --build
+```
 
 ## Tests
 
